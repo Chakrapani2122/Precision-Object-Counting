@@ -8,14 +8,14 @@ import matplotlib.pyplot as plt
 
 def dilation_erosion(image):
     """Apply optimized dilation and erosion to refine object boundaries."""
-    kernel = np.ones((3, 3), np.uint8)
+    kernel = np.ones((5, 5), np.uint8)  # Increased kernel size for better contour refinement
     dilated = cv2.dilate(image, kernel, iterations=2)
     eroded = cv2.erode(dilated, kernel, iterations=1)
     return eroded
 
 def otsu_threshold(image):
     """Apply Otsu's thresholding with Gaussian blur for noise reduction."""
-    blurred = cv2.GaussianBlur(image, (5, 5), 0)
+    blurred = cv2.GaussianBlur(image, (7, 7), 0)  # Increased kernel size for better noise reduction
     _, thresholded = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
     return thresholded
 
@@ -54,6 +54,17 @@ def filter_contours_by_size(contours, min_area=500, max_area=5000):
     filtered_contours = [contour for contour in contours if min_area <= cv2.contourArea(contour) <= max_area]
     return filtered_contours
 
+def filter_contours_by_size_and_shape(contours, min_area=1000, max_area=10000, min_aspect_ratio=0.3, max_aspect_ratio=1.0):
+    """Filter contours based on size and aspect ratio to reduce false positives."""
+    filtered_contours = []
+    for contour in contours:
+        area = cv2.contourArea(contour)
+        x, y, w, h = cv2.boundingRect(contour)
+        aspect_ratio = w / h if h > 0 else 0
+        if min_area <= area <= max_area and min_aspect_ratio <= aspect_ratio <= max_aspect_ratio:
+            filtered_contours.append(contour)
+    return filtered_contours
+
 def classify_contours(contours):
     """Classify contours as objects or people based on size and aspect ratio."""
     objects = []
@@ -67,43 +78,29 @@ def classify_contours(contours):
         if 2000 <= area <= 10000 and 0.3 <= aspect_ratio <= 0.8:
             people.append(contour)
         # Classify as objects otherwise
-        elif 800 <= area <= 10000:
+        elif 1000 <= area <= 8000:
             objects.append(contour)
     return objects, people
 
 def process_image(image):
+    """Process the image and count objects and people."""
     try:
-        # Crop, Resize, Gamma Correction
-        cropped_images = []
-        for (start_y, end_y, start_x, end_x) in [(100, 380, 380, 600), (20, 220, 100, 300), (200, 500, 0, 300)]:
-            cropped_img = crop(image, start_y, end_y, start_x, end_x)
-            if cropped_img is not None:
-                cropped_images.append(cropped_img)
-        # Resize, Gamma Correction, Adaptive Histogram Equalization, Otsu's Thresholding, Dilation and Erosion
-        dlt_er_img = None
-        for j, cropped_img in enumerate(cropped_images):
-            resized_img = resize(cropped_img, cropped_img.shape[1] * 2, cropped_img.shape[0] * 2)
-            if resized_img is None:
-                continue
-            gamma_corrected_img = gamma_correction(resized_img, [1.2, 0.5, 2.5][j])
-            if gamma_corrected_img is None:
-                continue
-            blurred_img = cv2.GaussianBlur(gamma_corrected_img, (5, 5), 0)
-            equalized_img = adaptive_histogram_equalization(blurred_img)
-            if equalized_img is None:
-                continue
-            thresholded_img = otsu_threshold(equalized_img)
-            if thresholded_img is None:
-                continue
-            dlt_er_img = dilation_erosion(thresholded_img)
-            if dlt_er_img is None:
-                continue
-        # Labeling using contours
-        count = labeling(dlt_er_img) if dlt_er_img is not None else 0
-        return count
+        # Preprocessing
+        thresholded_img = otsu_threshold(image)
+        dilated_eroded_img = dilation_erosion(thresholded_img)
+        
+        # Contour detection and filtering
+        contours, _ = cv2.findContours(dilated_eroded_img, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        filtered_contours = filter_contours_by_size_and_shape(contours, min_area=1000, max_area=10000)
+        
+        # Classify contours
+        objects, people = classify_contours(filtered_contours)
+        
+        # Return counts
+        return len(objects), len(people)
     except Exception as e:
         st.error(f"Error processing image: {e}")
-        return 0
+        return 0, 0
 
 def draw_head_bounding_boxes(image, contours, color):
     """Draw bounding boxes around the heads of detected people."""
@@ -130,6 +127,48 @@ def get_processing_stages(image):
     stages["Dilated and Eroded"] = dilated_eroded_img
     return stages
 
+def draw_circles(image, people_contours, object_contours):
+    """Draw small green circles for people and red circles for objects."""
+    output_image = image.copy()
+    for contour in people_contours:
+        x, y, w, h = cv2.boundingRect(contour)
+        center = (x + w // 2, y + h // 2)
+        radius = 10  # Small circle radius
+        cv2.circle(output_image, center, radius, (0, 255, 0), -1)  # Green circle for people
+    for contour in object_contours:
+        x, y, w, h = cv2.boundingRect(contour)
+        center = (x + w // 2, y + h // 2)
+        radius = 10  # Small circle radius
+        cv2.circle(output_image, center, radius, (0, 0, 255), -1)  # Red circle for objects
+    return output_image
+
+def draw_circles_on_color_image(image, people_contours, object_contours):
+    """Draw green circles for people's faces and red circles for objects on a color image."""
+    # Convert grayscale image to BGR to allow colored circles
+    output_image = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
+    for contour in people_contours:
+        x, y, w, h = cv2.boundingRect(contour)
+        face_center = (x + w // 2, y + int(h * 0.15))  # Adjusted to place the circle on the face (top 15% of the bounding box)
+        face_radius = max(w, h) // 8  # Adjusted radius for better accuracy
+        cv2.circle(output_image, face_center, face_radius, (0, 255, 0), -1)  # Green circle for people's faces
+    for contour in object_contours:
+        x, y, w, h = cv2.boundingRect(contour)
+        object_center = (x + w // 2, y + h // 2)  # Center of the bounding box for objects
+        object_radius = min(w, h) // 4  # Adjusted radius for objects
+        cv2.circle(output_image, object_center, object_radius, (0, 0, 255), -1)  # Red circle for objects
+    return output_image
+
+def get_processing_stages_with_circles(image):
+    """Return images at different processing stages, including one with circles."""
+    stages = get_processing_stages(image)
+    thresholded_img = otsu_threshold(image)
+    dilated_eroded_img = dilation_erosion(thresholded_img)
+    contours, _ = cv2.findContours(dilated_eroded_img, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    filtered_contours = filter_contours_by_size_and_shape(contours, min_area=1000, max_area=10000)
+    objects, people = classify_contours(filtered_contours)
+    stages["People and Objects Marked"] = draw_circles_on_color_image(image, people, objects)
+    return stages
+
 # Streamlit app
 st.title("Object and People Counting App")
 
@@ -142,8 +181,8 @@ if uploaded_file is not None:
     image_np = cv2.imdecode(file_bytes, cv2.IMREAD_GRAYSCALE)  # Convert to grayscale
     st.image(image_np, caption="Uploaded Image", use_column_width=True)
     
-    # Get processing stages
-    stages = get_processing_stages(image_np)
+    # Get processing stages with circles
+    stages = get_processing_stages_with_circles(image_np)
     stage_names = ["No Image Selected"] + list(stages.keys())
     
     # Dropdown to select processing stage
@@ -155,5 +194,6 @@ if uploaded_file is not None:
     
     # Final processing and count
     st.write("Processing...")
-    count = process_image(image_np)
-    st.success(f"Objects/People Counted: {count}")
+    object_count, people_count = process_image(image_np)
+    st.success(f"Objects Counted: {object_count}")
+    st.success(f"People Counted: {people_count}")
