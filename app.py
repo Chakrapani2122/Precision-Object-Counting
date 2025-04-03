@@ -133,83 +133,27 @@ def get_processing_stages(image):
 # Streamlit app
 st.title("Object and People Counting App")
 
-# Move options to the main page
-option = st.radio("Choose an option:", ("Access Camera", "Upload Image"))
-
-# Initialize session state for camera control
-if "camera_running" not in st.session_state:
-    st.session_state.camera_running = False
-
-if option == "Access Camera":
-    st.subheader("Access Camera")
+# Remove camera option, keep only the upload image option
+st.subheader("Upload Image")
+uploaded_file = st.file_uploader("Choose an image file", type=["jpg", "jpeg", "png"])
+if uploaded_file is not None:
+    # Read the uploaded image directly using OpenCV
+    file_bytes = np.asarray(bytearray(uploaded_file.read()), dtype=np.uint8)
+    image_np = cv2.imdecode(file_bytes, cv2.IMREAD_GRAYSCALE)  # Convert to grayscale
+    st.image(image_np, caption="Uploaded Image", use_column_width=True)
     
-    # Start and Stop Camera buttons
-    start_camera = st.button("Start Camera")
-    stop_camera = st.button("Stop Camera")
-
-    if start_camera:
-        st.session_state.camera_running = True
-    if stop_camera:
-        st.session_state.camera_running = False
-
-    if st.session_state.camera_running:
-        cap = cv2.VideoCapture(0)
-        stframe = st.empty()
-
-        if cap.isOpened():
-            while True:
-                if not st.session_state.camera_running:
-                    break
-                ret, frame = cap.read()
-                if not ret:
-                    st.error("Failed to access the camera.")
-                    break
-                gray_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-                
-                # Preprocessing and contour detection
-                thresholded_img = otsu_threshold(gray_frame)
-                dilated_eroded_img = dilation_erosion(thresholded_img)
-                contours, _ = cv2.findContours(dilated_eroded_img, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-                
-                # Filter and classify contours
-                filtered_contours = filter_contours_by_size(contours, min_area=800, max_area=10000)
-                objects, people = classify_contours(filtered_contours)
-                
-                # Draw bounding boxes for objects and people
-                draw_fixed_size_boxes(frame, objects, (0, 0, 255), box_size=50)  # Red fixed-size squares for objects
-                draw_head_bounding_boxes(frame, people, (0, 255, 0))  # Green head-only squares for people
-                
-                # Display counts
-                object_count = len(objects)
-                people_count = len(people)
-                cv2.putText(frame, f"Objects: {object_count}", (10, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
-                cv2.putText(frame, f"People: {people_count}", (10, 100), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
-                stframe.image(frame, channels="BGR")
-            cap.release()
-        else:
-            st.error("Unable to access the camera.")
-
-elif option == "Upload Image":
-    st.subheader("Upload Image")
-    uploaded_file = st.file_uploader("Choose an image file", type=["jpg", "jpeg", "png"])
-    if uploaded_file is not None:
-        # Read the uploaded image directly using OpenCV
-        file_bytes = np.asarray(bytearray(uploaded_file.read()), dtype=np.uint8)
-        image_np = cv2.imdecode(file_bytes, cv2.IMREAD_GRAYSCALE)  # Convert to grayscale
-        st.image(image_np, caption="Uploaded Image", use_column_width=True)
-        
-        # Get processing stages
-        stages = get_processing_stages(image_np)
-        stage_names = ["No Image Selected"] + list(stages.keys())
-        
-        # Dropdown to select processing stage
-        selected_stage = st.selectbox("Select Processing Stage", stage_names)
-        if selected_stage != "No Image Selected":
-            st.image(stages[selected_stage], caption=f"{selected_stage} Image", use_column_width=True)
-        else:
-            st.write("No image selected for display.")
-        
-        # Final processing and count
-        st.write("Processing...")
-        count = process_image(image_np)
-        st.success(f"Objects/People Counted: {count}")
+    # Get processing stages
+    stages = get_processing_stages(image_np)
+    stage_names = ["No Image Selected"] + list(stages.keys())
+    
+    # Dropdown to select processing stage
+    selected_stage = st.selectbox("Select Processing Stage", stage_names)
+    if selected_stage != "No Image Selected":
+        st.image(stages[selected_stage], caption=f"{selected_stage} Image", use_column_width=True)
+    else:
+        st.write("No image selected for display.")
+    
+    # Final processing and count
+    st.write("Processing...")
+    count = process_image(image_np)
+    st.success(f"Objects/People Counted: {count}")
