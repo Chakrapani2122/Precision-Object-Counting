@@ -193,9 +193,10 @@ elif option == "Upload Image":
     st.subheader("Upload Image")
     uploaded_file = st.file_uploader("Choose an image file", type=["jpg", "jpeg", "png"])
     if uploaded_file is not None:
-        image = Image.open(uploaded_file)
-        image_np = np.array(image.convert("L"))  # Convert to grayscale
-        st.image(image, caption="Uploaded Image", use_column_width=True)
+        # Read the uploaded image directly using OpenCV
+        file_bytes = np.asarray(bytearray(uploaded_file.read()), dtype=np.uint8)
+        image_np = cv2.imdecode(file_bytes, cv2.IMREAD_GRAYSCALE)  # Convert to grayscale
+        st.image(image_np, caption="Uploaded Image", use_column_width=True)
         
         # Get processing stages
         stages = get_processing_stages(image_np)
